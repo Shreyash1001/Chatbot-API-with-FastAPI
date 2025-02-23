@@ -1,0 +1,9 @@
+fastapi==0.95.0
+uvicorn==0.22.0
+transformers==4.28.1
+sentence-transformers==2.2.0
+faiss-cpu==1.7.3
+redis==4.3.3
+pymupdf==1.21.0
+serpapi==2.8.0
+python-dotenv==0.21.0
