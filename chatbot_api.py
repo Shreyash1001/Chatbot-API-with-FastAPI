@@ -44,7 +44,7 @@ def retrieve_relevant_text(query):
 
 
 
-SERPAPI_KEY = os.getenv("SERPAPI_KEY")  # Ensure the correct variable name is set in the environment.
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")  
 
 
 def web_search(query):
@@ -71,8 +71,8 @@ qa_pipeline = pipeline("question-answering", model="deepset/roberta-base-squad2"
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 try:
     redis_client = redis.Redis.from_url(REDIS_URL, decode_responses=True)
-    redis_client.ping()  # Check if Redis is available
-    chat_memory = None  # Use Redis
+    redis_client.ping()  
+    chat_memory = None  
 except:
     redis_client = None
     chat_memory = defaultdict(lambda: deque(maxlen=10))  # Fallback to in-memory storage
@@ -127,7 +127,7 @@ def ask_question(data: Question):
 
     try:
         response = qa_pipeline(question=data.question, context=full_context)
-        if response["score"] < 0.01:  # If confidence is low, fetch from the web
+        if response["score"] < 0.01:  # If confidence is low go to fetch from the web
             web_data = web_search(data.question)
             response = qa_pipeline(question=data.question, context=web_data)
 
