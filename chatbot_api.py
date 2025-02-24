@@ -82,24 +82,34 @@ class Question(BaseModel):
     user_id: str
     context: str
 
+import json
+
 def store_chat(user_id, question, answer):
     """Store chat history in Redis or in-memory."""
+    chat_entry = {"question": question, "answer": answer}  # Store as a dictionary
     if redis_client:
         key = f"chat:{user_id}"
-        redis_client.rpush(key, f"Q: {question} | A: {answer}")
+        redis_client.rpush(key, json.dumps(chat_entry))  # Use JSON to store
         redis_client.ltrim(key, -10, -1)  # Keep only last 10 messages
     else:
-        chat_memory[user_id].append({"question": question, "answer": answer})
+        chat_memory[user_id].append(chat_entry)  # Store as a dictionary
+
 
 def get_chat_history(user_id):
-    """Retrieve chat history from Redis or in-memory."""
+    """Retrieve chat history."""
     if redis_client:
-        return redis_client.lrange(f"chat:{user_id}", 0, -1)
-    return list(chat_memory[user_id])
-    history = get_chat_history(user_id)
-    print("Chat History:", history)  # Debugging line
-    previous_context = " ".join(entry["answer"] for entry in history)
-
+        chat_history = redis_client.lrange(f"chat:{user_id}", 0, -1)
+        # Ensure we only try to load valid JSON data
+        history = []
+        for entry in chat_history:
+            try:
+                history.append(json.loads(entry))  # Use JSON to load
+            except json.JSONDecodeError:
+                # Handle invalid or empty data
+                print(f"Skipping invalid chat entry for user {user_id}")
+                continue
+        return history
+    return list(chat_memory[user_id]) 
 
 async def extract_text_from_pdf(file: UploadFile):
     """Extract text from a PDF file properly."""
@@ -127,7 +137,7 @@ def ask_question(data: Question):
 
     try:
         response = qa_pipeline(question=data.question, context=full_context)
-        if response["score"] < 0.01:  # If confidence is low go to fetch from the web
+        if response["score"] < 0.0001:  # If confidence is low go to fetch from the web
             web_data = web_search(data.question)
             response = qa_pipeline(question=data.question, context=web_data)
 
@@ -146,16 +156,18 @@ async def ask_pdf(question: str = Form(...), user_id: str = Form(...), file: Upl
 
     best_answer = {"answer": "No relevant answer found.", "score": 0}
     for chunk in pdf_chunks:
-        full_context = (previous_answers + " " + chunk)[:1024]  
+        full_context = (previous_answers + " " + chunk)[:1024]  # Ensure no context exceeds the length
         try:
             response = qa_pipeline(question=question, context=full_context)
             if response["score"] > best_answer["score"]:
                 best_answer = response
-        except Exception:
-            continue  
+        except Exception as e:
+            print(f"Error processing chunk: {e}")
+            continue  # Skip on error and try next chunk
 
     store_chat(user_id, question, best_answer["answer"])
     return best_answer
+
 
 @app.get("/history/{user_id}")
 def get_chat_history_api(user_id: str):
@@ -166,3 +178,42 @@ def get_chat_history_api(user_id: str):
 def health_check():
     """Check API health."""
     return {"status": "running"}
+
+@app.get("/redis-health")
+def redis_health_check():
+    if redis_client:
+        try:
+            redis_client.ping()  # Ping Redis server
+            return {"status": "Redis is working!"}
+        except Exception as e:
+            return {"status": f"Redis is down! Error: {str(e)}"}
+    else:
+        return {"status": "Redis client is not initialized."}
+
+
+@app.post("/add-faq")
+def add_faq(question: str, answer: str):
+    """Add a custom FAQ to the system."""
+    faq_entry = {"question": question, "answer": answer}
+    if redis_client:
+        redis_client.set(f"faq:{question}", answer)  # Store in Redis
+    else:
+        # Store in-memory if Redis is not available
+        chat_memory["faq"].append(faq_entry)
+    return {"status": "FAQ added successfully"}
+
+
+@app.get("/faq/{question}")
+def get_faq_answer(question: str):
+    """Retrieve an answer from the custom FAQ."""
+    if redis_client:
+        answer = redis_client.get(f"faq:{question}")
+        if answer:
+            return {"answer": answer}
+        else:
+            return {"answer": "No answer found for this question."}
+    else:
+        for faq in chat_memory.get("faq", []):
+            if faq["question"] == question:
+                return {"answer": faq["answer"]}
+        return {"answer": "No answer found for this question."}
